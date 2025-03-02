@@ -20,7 +20,7 @@ def schedule_reminders(reservation_id):
         start_datetime = make_aware(datetime.combine(date, start_time))  # Учитываем таймзону
 
         # Формируем ссылку для подтверждения
-        confirmation_link = f"{settings.FRONTEND_URL}/confirm/{reservation.confirmation_token}"
+        confirmation_link = f"{settings.SITE_URL}/confirm/{reservation.confirmation_token}"
 
         # Напоминание за 1 час
         reminder_time = start_datetime - timedelta(hours=1)
