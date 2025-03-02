@@ -1,9 +1,7 @@
-from django.urls import path
-from .views import ConfirmReservationView, ReservationUpdateDestroyView,ReservationCreateView
+from rest_framework.routers import DefaultRouter
+from .views import ReservationViewSet
 
-urlpatterns = [
-    path('create/', ReservationCreateView.as_view(), name='reservation-create'),  # Для создания бронирования
-    path('reservations/<int:pk>/', ReservationUpdateDestroyView.as_view(), name='reservation-detail'),  # Для получения/обновления/удаления бронирования
-    path('confirm-reservation/<int:pk>/', ConfirmReservationView.as_view(), name='confirm_reservation'),
-    # Для подтверждения бронирования
-]
+router = DefaultRouter()
+router.register(r"reservations", ReservationViewSet, basename="reservation")
+
+urlpatterns = router.urls

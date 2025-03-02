@@ -1,27 +1,38 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.utils.timezone import now
-from datetime import datetime, timedelta
-from .models import Reservation
-from .tasks import send_reservation_confirmation_email_task, auto_cancel_unconfirmed_reservation
+from django.core.mail import send_mail
+from django.conf import settings
 
+from .models import Reservation
+from .tasks import schedule_reminders
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.core.mail import send_mail
+from django.conf import settings
+from .models import Reservation
+from .tasks import schedule_reminders
 
 @receiver(post_save, sender=Reservation)
-def schedule_reservation_tasks(sender, instance, created, **kwargs):
-    """Планирует отправку email и автоотмену брони"""
-    if not created:
-        return
+def reservation_created(sender, instance, created, **kwargs):
+    """
+    Отправляет email с подтверждением бронирования и запланированными напоминаниями.
+    """
+    if created:
+        confirm_link = f"{settings.SITE_URL}/api/reservation/reservations/confirm/{instance.confirmation_token}/"
 
-    reservation_datetime = datetime.combine(instance.date, instance.time)
+        subject = "Подтвердите ваше бронирование"
+        message = (
+            f"Здравствуйте, {instance.user.email}!\n\n"
+            f"Вы забронировали столик №{instance.table.number} на {instance.date} в {instance.time}.\n"
+            f"Для подтверждения бронирования перейдите по ссылке: {confirm_link}\n\n"
+            f"Если вы не подтвердите бронирование за 15 минут до начала, оно будет автоматически отменено.\n"
+            f"Спасибо за выбор нашего ресторана!"
+        )
 
-    """ Запускаем email-уведомление за 1 час"""
-    email_send_time = reservation_datetime - timedelta(minutes=60)
-    email_countdown = (email_send_time - now()).total_seconds()
-    if email_countdown > 0:
-        send_reservation_confirmation_email_task.apply_async(args=[instance.id], countdown=email_countdown)
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [instance.user.email])
 
-    """ Запускаем автоотмену за 15 минут"""
-    cancel_time = reservation_datetime - timedelta(minutes=15)
-    cancel_countdown = (cancel_time - now()).total_seconds()
-    if cancel_countdown > 0:
-        auto_cancel_unconfirmed_reservation.apply_async(args=[instance.id], countdown=cancel_countdown)
+        # Запускаем задачи для напоминаний и автоотмены через Celery
+        schedule_reminders.delay(instance.id)
+

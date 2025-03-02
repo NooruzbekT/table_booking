@@ -1,35 +1,64 @@
-import logging
 from celery import shared_task
-from django.utils.timezone import now
+from django.conf import settings
+from django.utils.timezone import now, make_aware
+from datetime import datetime, timedelta
 from .models import Reservation
-from utils import send_booking_confirmation_email
-
-logger = logging.getLogger(__name__)
+from .utils import send_email
 
 @shared_task
-def send_reservation_confirmation_email_task(reservation_id):
-    """Celery-задача для отправки email перед бронированием"""
-    try:
-        reservation = Reservation.objects.select_related("user", "table").get(id=reservation_id)
-        if reservation.status in ["pending", "confirmed"]:
-            send_booking_confirmation_email(
-                reservation.user.email, reservation.id, reservation.table.id, reservation.date, reservation.time
-            )
-    except Reservation.DoesNotExist:
-        logger.warning(f"Бронирование {reservation_id} не найдено для отправки email.")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке email для бронирования {reservation_id}: {e}")
+def send_email_notification(user_email, subject, message):
+    """ Celery-задача для отправки email. """
+    send_email(user_email, subject, message)
 
 @shared_task
-def auto_cancel_unconfirmed_reservation(reservation_id):
-    """Отменяет бронирование, если оно не подтверждено за 15 минут до начала"""
+def schedule_reminders(reservation_id):
+    """ Планируем напоминания и автоотмену брони. """
     try:
         reservation = Reservation.objects.get(id=reservation_id)
-        if reservation.status == "pending":
+        start_time = reservation.time
+        date = reservation.date
+        start_datetime = make_aware(datetime.combine(date, start_time))  # Учитываем таймзону
+
+        # Формируем ссылку для подтверждения
+        confirmation_link = f"{settings.FRONTEND_URL}/confirm/{reservation.confirmation_token}"
+
+        # Напоминание за 1 час
+        reminder_time = start_datetime - timedelta(hours=1)
+        if reminder_time > now():
+            send_email_notification.apply_async(
+                args=[reservation.user.email, "Напоминание о бронировании",
+                      f"Ваше бронирование на {date} {start_time} начнется через 1 час."],
+                eta=reminder_time
+            )
+
+        # Запрос на подтверждение за 15 минут
+        confirm_time = start_datetime - timedelta(minutes=15)
+        if confirm_time > now():
+            send_email_notification.apply_async(
+                args=[reservation.user.email, "Подтвердите бронирование",
+                      f"Пожалуйста, подтвердите ваше бронирование на {date} {start_time}, иначе оно будет отменено.\n"
+                      f"Подтвердите его здесь: {confirmation_link}"],
+                eta=confirm_time
+            )
+
+            # Автоотмена, если не подтвердили
+            auto_cancel_time = start_datetime - timedelta(minutes=14)
+            auto_cancel_reservation.apply_async(args=[reservation.id], eta=auto_cancel_time)
+
+    except Reservation.DoesNotExist:
+        pass
+
+@shared_task
+def auto_cancel_reservation(reservation_id):
+    """ Отмена брони, если не подтверждена за 15 минут. """
+    try:
+        reservation = Reservation.objects.get(id=reservation_id)
+        if reservation.status == "pending":  # Только если не подтверждена
             reservation.status = "cancelled"
             reservation.save()
-            logger.info(f"Бронирование {reservation_id} автоматически отменено.")
+            send_email_notification.delay(
+                reservation.user.email, "Бронирование отменено",
+                f"Ваше бронирование на {reservation.date} {reservation.time} было автоматически отменено, так как не было подтверждено."
+            )
     except Reservation.DoesNotExist:
-        logger.warning(f"Бронирование {reservation_id} не найдено для автоотмены.")
-    except Exception as e:
-        logger.error(f"Ошибка при автоотмене бронирования {reservation_id}: {e}")
+        pass
