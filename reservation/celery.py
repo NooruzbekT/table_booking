@@ -10,4 +10,6 @@ app = Celery("Reservation_System")
 
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
+print("Celery BROKER:", app.conf.broker_url)
+print("Celery BACKEND:", app.conf.result_backend)
 app.autodiscover_tasks()

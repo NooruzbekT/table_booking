@@ -17,7 +17,7 @@ def schedule_reminders(reservation_id):
         reservation = Reservation.objects.get(id=reservation_id)
         start_time = reservation.time
         date = reservation.date
-        start_datetime = make_aware(datetime.combine(date, start_time))  # Учитываем таймзону
+        start_datetime = make_aware(datetime.combine(date, start_time))
 
         # Формируем ссылку для подтверждения
         confirmation_link = f"{settings.SITE_URL}/confirm/{reservation.confirmation_token}"

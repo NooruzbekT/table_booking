@@ -1,11 +1,3 @@
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from django.core.mail import send_mail
-from django.conf import settings
-
-from .models import Reservation
-from .tasks import schedule_reminders
-
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -33,6 +25,6 @@ def reservation_created(sender, instance, created, **kwargs):
 
         send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [instance.user.email])
 
-        # Запускаем задачи для напоминаний и автоотмены через Celery
+
         schedule_reminders.delay(instance.id)
 
