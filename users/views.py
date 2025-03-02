@@ -1,81 +1,21 @@
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import status, serializers
-from .models import User
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import UserLoginSerializer
+from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from .serializers import UserSerializer
-from .utils import send_verification_email, send_reset_password_email
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.decorators import action
 import uuid
+from .models import User
+from .serializers import UserSerializer, UserRegistrationSerializer, UserLoginSerializer, ResetPasswordSerializer
+from .utils import send_verification_email, send_reset_password_email
 
+class UserViewSet(viewsets.ViewSet):
+    """
+    ViewSet для управления пользователями (регистрация, вход, восстановление пароля).
+    """
 
-
-
-
-class UserLoginView(APIView):
-    def post(self, request):
-        serializer = UserLoginSerializer(data=request.data)
-        if serializer.is_valid():
-            return Response(serializer.validated_data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-
-
-class LoginAPIView(APIView):
-    def post(self, request):
-        email = request.data.get("email")
-        password = request.data.get("password")
-
-        user = authenticate(email=email, password=password)
-
-        if user is None:
-            return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        # Генерация JWT-токенов
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
-
-
-
-
-class UserAPIView(APIView):
-    permission_classes = [IsAuthenticated]  # Только авторизованные пользователи
-
-    def get(self, request):
-        """Получить данные текущего пользователя"""
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    def patch(self, request):
-        """Редактирование данных пользователя"""
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request):
-        """Удаление аккаунта"""
-        request.user.delete()
-        return Response({"message": "User deleted"}, status=status.HTTP_204_NO_CONTENT)
-
-
-
-
-class RegisterView(APIView):
-    def post(self, request):
-        serializer = UserSerializer(data=request.data)
+    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    def register(self, request):
+        """Регистрация пользователя."""
+        serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
             user.is_verified = False
@@ -83,12 +23,11 @@ class RegisterView(APIView):
             user.save()
             send_verification_email(user.email, user.verification_token)  # Отправляем email
             return Response({"message": "На вашу почту отправлено письмо для подтверждения."})
-        return Response(serializer.errors, status=400)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-
-class VerifyEmailView(APIView):
-    def get(self, request, token):
+    @action(detail=False, methods=["get"], url_path="verify-email/(?P<token>[^/.]+)", permission_classes=[AllowAny])
+    def verify_email(self, request, token=None):
+        """Подтверждение email."""
         try:
             user = User.objects.get(verification_token=token)
             user.is_verified = True
@@ -96,12 +35,40 @@ class VerifyEmailView(APIView):
             user.save()
             return Response({"message": "Email подтвержден!"})
         except User.DoesNotExist:
-            return Response({"error": "Неверный токен"}, status=400)
+            return Response({"error": "Неверный токен"}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    def login(self, request):
+        """Авторизация пользователя."""
+        serializer = UserLoginSerializer(data=request.data)
+        if serializer.is_valid():
+            return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def me(self, request):
+        """Получение информации о текущем пользователе."""
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-class ForgotPasswordView(APIView):
-    def post(self, request):
+    @action(detail=False, methods=["patch"], permission_classes=[IsAuthenticated])
+    def update_me(self, request):
+        """Редактирование данных пользователя."""
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=["delete"], permission_classes=[IsAuthenticated])
+    def delete_me(self, request):
+        """Удаление аккаунта."""
+        request.user.delete()
+        return Response({"message": "Аккаунт удален"}, status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    def forgot_password(self, request):
+        """Отправка ссылки для сброса пароля."""
         email = request.data.get("email")
         try:
             user = User.objects.get(email=email)
@@ -112,13 +79,9 @@ class ForgotPasswordView(APIView):
         except User.DoesNotExist:
             return Response({"error": "Пользователь с таким email не найден."}, status=status.HTTP_404_NOT_FOUND)
 
-
-class ResetPasswordSerializer(serializers.Serializer):
-    new_password = serializers.CharField(write_only=True, min_length=6)
-
-
-class ResetPasswordView(APIView):
-    def post(self, request, token):
+    @action(detail=False, methods=["post"], url_path="reset-password/(?P<token>[^/.]+)", permission_classes=[AllowAny])
+    def reset_password(self, request, token=None):
+        """Сброс пароля по токену."""
         try:
             user = User.objects.get(reset_token=token)
         except User.DoesNotExist:
@@ -130,5 +93,4 @@ class ResetPasswordView(APIView):
             user.reset_token = None
             user.save()
             return Response({"message": "Пароль успешно изменен."})
-
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

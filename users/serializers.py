@@ -1,3 +1,4 @@
+from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -12,18 +13,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = ["first_name", "last_name", "email", "phone", "password", "confirm_password"]
 
-    def validate_email(self, value):
-        """Проверяем, есть ли пользователь с таким email."""
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Пользователь с таким email уже существует.")
-        return value
-
-    def validate_phone(self, value):
-        """Проверяем, есть ли пользователь с таким телефоном."""
-        if User.objects.filter(phone=value).exists():
-            raise serializers.ValidationError("Пользователь с таким телефоном уже существует.")
-        return value
-
     def validate(self, data):
         """Проверяем, совпадают ли пароли."""
         if data["password"] != data["confirm_password"]:
@@ -33,8 +22,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Создаем нового пользователя."""
         validated_data.pop("confirm_password")
-        user = User.objects.create_user(**validated_data)
-        return user
+        validated_data["password"] = make_password(validated_data["password"])
+        return User.objects.create(**validated_data)
+
 
 
 
@@ -43,6 +33,7 @@ class UserLoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
+        """Аутентификация пользователя."""
         email = data.get("email")
         password = data.get("password")
 
@@ -61,12 +52,29 @@ class UserLoginSerializer(serializers.Serializer):
 
 
 
+
+
 class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, required=False, min_length=6)
+
     class Meta:
         model = User
         fields = ["id", "first_name", "last_name", "email", "phone", "is_verified", "password"]
-        read_only_fields = ["id", "is_verified"]
+        read_only_fields = ["id", "is_verified", "email"]
 
-    def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+    def update(self, instance, validated_data):
+        """Обновление профиля пользователя."""
+        if "password" in validated_data:
+            validated_data["password"] = make_password(validated_data["password"])
+        return super().update(instance, validated_data)
+
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    new_password = serializers.CharField(write_only=True, min_length=6)
+
+    def validate_new_password(self, value):
+        """Минимальная длина пароля 6 символов"""
+        if len(value) < 6:
+            raise serializers.ValidationError("Пароль должен содержать минимум 6 символов.")
+        return value

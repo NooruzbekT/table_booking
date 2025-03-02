@@ -25,7 +25,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
             return ReservationCreateSerializer
         elif self.action in ["update", "partial_update"]:
             return ReservationUpdateSerializer
-        return ReservationCreateSerializer  # Для list и retrieve используем общий
+        return ReservationCreateSerializer
 
     def perform_create(self, serializer):
         """ Привязываем бронирование к текущему пользователю. """
@@ -62,6 +62,6 @@ class ReservationViewSet(viewsets.ModelViewSet):
         Фильтруем бронирования только для текущего пользователя (если не админ).
         """
         user = self.request.user
-        if user.is_staff:  # Админ может видеть все бронирования
+        if user.is_staff:
             return Reservation.objects.all()
         return Reservation.objects.filter(user=user)
