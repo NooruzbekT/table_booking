@@ -148,7 +148,7 @@ EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "nookentoktobaev@gmail.com"
-EMAIL_HOST_PASSWORD = "mbke iwrz plnv ccpe"
+EMAIL_HOST_PASSWORD = "код кароче"
 
 from datetime import timedelta
 
